@@ -1,12 +1,9 @@
-------------------------------------------------------------------------
-
 ---
-title: "📝 HW1"
+title: "HW1"
 editor: 
   markdown: 
     wrap: sentence
-format: 
-  pdf
+format: pdf
 ---
 
 # STAT 131A, Fall 2026: HW1 Code
