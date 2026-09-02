@@ -1,0 +1,431 @@
+# EDA Lecture Demo
+
+```{r}
+library(tidyverse)
+
+# Makes plots look prettier
+theme_set(theme_bw())
+
+# Use the colorblind-safe Okabe-Ito palette in every plot below
+okabe_ito = unname(palette.colors(palette = "Okabe-Ito"))
+options(
+    ggplot2.discrete.colour = okabe_ito,
+    ggplot2.discrete.fill = okabe_ito
+)
+
+df = read_csv('pivoted-ucb-data.csv')
+df
+```
+
+```{r}
+# View(df)
+```
+
+```{r}
+arrange(df, applied)
+```
+
+```{r}
+# Note that the original DataFrame is not modified by our exploration
+df
+```
+
+```{r}
+sample_n(df, 10)
+```
+
+```{r}
+nrow(df)
+```
+
+```{r}
+df$applied
+```
+
+```{r}
+min(df$applied)
+```
+
+```{r}
+max(df$applied)
+```
+
+```{r}
+mean(df$applied)
+```
+
+```{r}
+sd(df$applied)
+```
+
+```{r}
+arrange(df, desc(applied))
+```
+
+```{r}
+df2 = read_csv('pivoted-ucb-data-w-enrollment.csv')
+df2
+```
+
+```{r}
+df2 = mutate(df2, app_rate = applied / grade_12)
+df2
+```
+
+```{r}
+arrange(df2, desc(app_rate))
+```
+
+```{r}
+df2_new = df2 %>%
+    filter(app_rate <= 1) %>%
+    arrange(desc(app_rate))
+df2_new
+```
+
+```{r}
+summary(df2_new$app_rate)
+```
+
+```{r}
+summary(df2_new)
+```
+
+```{r}
+ggplot(df2_new, aes(x=app_rate)) + geom_boxplot()
+```
+
+```{r}
+ggplot(df2_new, aes(x=app_rate)) + geom_histogram()
+
+```
+
+```{r}
+df3 = read_csv('pivoted-ucb-data-w-everything.csv')
+df3
+```
+
+```{r}
+ggplot(df3, aes(x=dist_to_ucb_miles)) + geom_boxplot()
+```
+
+```{r}
+ggplot(df3, aes(x=dist_to_ucb_miles)) + geom_histogram()
+```
+
+```{r}
+ggplot(df3, aes(x=dist_to_ucb_miles)) + geom_histogram(bins=50)
+
+```
+
+```{r}
+# Count how many schools are in each city
+city_counts = df3 %>% 
+    count(city) %>% 
+    arrange(desc(n))
+
+city_counts
+```
+
+```{r}
+# Just the 10 most common cities
+slice(city_counts, 1:10)
+```
+
+```{r}
+# Need to re-add in the app_rate column to this dataset
+df3 = mutate(df3, app_rate = applied / grade_12)
+df3_new = filter(df3, app_rate <= 1)
+```
+
+```{r}
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate)) + geom_point()
+```
+
+```{r}
+# Add a straight-line (linear) fit
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate)) +
+    geom_point() +
+    geom_smooth(method = "lm")
+```
+
+```{r}
+# Add a smooth (loess) fit instead
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate)) +
+    geom_point() +
+    geom_smooth(method = "loess")
+```
+
+
+```{r}
+# Size each point by 12th grade enrollment
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate, size = grade_12)) +
+    geom_point()
+```
+
+```{r}
+# Add some transparency
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate, size = grade_12)) +
+    geom_point(alpha=0.3)
+```
+
+
+```{r}
+ggplot(df3_new, aes(x = pct_free_reduced, y = app_rate, size = applied)) +
+    geom_point(alpha=0.3)
+```
+
+```{r}
+# Rank each school by free/reduced lunch percentage, on a 0 to 1 scale
+df3_new = df3_new %>%
+    mutate(frl_percentile_raw = percent_rank(pct_free_reduced))
+df3_new
+```
+
+```{r}
+# Slice that 0 to 1 range into 4 labeled groups
+df3_new = df3_new %>%
+    mutate(frl_percentile = cut(
+        frl_percentile_raw,
+        breaks = c(0, 0.25, 0.5, 0.75, 1),
+        labels = c("0-25", "25-50", "50-75", "75-100"),
+        include.lowest = TRUE
+    ))
+df3_new
+```
+
+```{r}
+df3_grouped = df3_new %>%
+    group_by(frl_percentile) %>%
+    summarize(applied = sum(applied), grade_12 = sum(grade_12))
+df3_grouped
+```
+
+```{r}
+# Remove the NA group
+df3_grouped = df3_grouped %>% 
+    filter(! is.na(frl_percentile))
+
+df3_grouped
+```
+
+```{r}
+df3_grouped = mutate(df3_grouped, avg_app_rate = applied / grade_12)
+df3_grouped
+```
+
+```{r}
+# group = 1 tells ggplot to connect the points across the categories
+ggplot(df3_grouped, aes(x = frl_percentile, y = avg_app_rate, group = 1)) +
+    geom_line()
+```
+
+```{r}
+# Average enrollment in each city
+city_enrollment = df3 %>%
+    group_by(city) %>%
+    summarize(tot_enrolled = mean(tot_enrolled))
+
+city_enrollment
+```
+
+```{r}
+slice(city_enrollment, 1:10)
+```
+
+```{r}
+head(df3, 3)
+```
+
+```{r}
+# Another way to build the same buckets, this time on the full dataset:
+# percent_rank() gives each school's position from 0 to 1, and cut() slices
+# that 0-1 range into 4 labeled groups
+df3 = df3 %>%
+    mutate(
+        frl_percentile_raw = percent_rank(pct_free_reduced),
+        frl_percentile = cut(
+            frl_percentile_raw,
+            breaks = c(0, 0.25, 0.5, 0.75, 1),
+            labels = c("0-25", "25-50", "50-75", "75-100"),
+            include.lowest = TRUE
+        )
+    )
+df3
+```
+
+```{r}
+# Same group / drop NA / rate steps as before, now all in one pipeline
+df3_grouped = df3 %>%
+    group_by(frl_percentile) %>%
+    summarize(applied = sum(applied), grade_12 = sum(grade_12)) %>%
+    filter(! is.na(frl_percentile)) %>%
+    mutate(avg_app_rate = applied / grade_12)
+
+df3_grouped
+```
+
+```{r}
+# The admitted column has missing values, so we have to decide what to do
+# with them. Make one column per choice, then compare the results.
+
+# Makes the randomness behave the same every run.
+set.seed(131)
+
+df3_imputed = df3 %>%
+    mutate(
+        admitted_zero = replace_na(admitted, 0),
+        admitted_two = replace_na(admitted, 2),
+        admitted_random = if_else(
+            is.na(admitted),
+            sample(0:2, n(), replace = TRUE),
+            admitted
+        ),
+        # Ignoring a row drops its applied count too, not just its admitted count
+        applied_kept = if_else(is.na(admitted), 0, applied)
+    )
+```
+
+```{r}
+# One summarize gives us the admission rate under all four choices
+rate_by_decile = df3_imputed %>%
+    group_by(frl_percentile) %>%
+    summarize(
+        applied = sum(applied),
+        applied_kept = sum(applied_kept),
+        admitted_zero = sum(admitted_zero),
+        admitted_two = sum(admitted_two),
+        admitted_random = sum(admitted_random)
+    ) %>%
+    filter(! is.na(frl_percentile)) %>%
+    mutate(
+        rate_ignore = admitted_zero / applied_kept,
+        rate_zero = admitted_zero / applied,
+        rate_two = admitted_two / applied,
+        rate_random = admitted_random / applied
+    )
+
+rate_by_decile
+```
+
+```{r}
+# Method 1: Ignore rows where admitted is NA
+ggplot(rate_by_decile, aes(x = frl_percentile, y = rate_ignore, group = 1)) +
+    geom_line() +
+    labs(title = "Ignore admitted=NA", y='admission_rate')
+```
+
+```{r}
+# Method 2: Replace NA admitted with 0
+ggplot(rate_by_decile, aes(x = frl_percentile, y = rate_zero, group = 1)) +
+    geom_line() +
+    labs(title = "Replace admitted=NA with 0", y='admission_rate')
+```
+
+```{r}
+# Method 3: Replace NA admitted with 2
+ggplot(rate_by_decile, aes(x = frl_percentile, y = rate_two, group = 1)) +
+    geom_line() +
+    labs(title = "Replace admitted=NA with 2", y='admission_rate')
+```
+
+```{r}
+# Method 4: Replace NA admitted with a random whole number from 0 to 2
+ggplot(rate_by_decile, aes(x = frl_percentile, y = rate_random, group = 1)) +
+    geom_line() +
+    labs(title = "Replace admitted=NA with random 0 to 2", y='admission_rate')
+```
+
+```{r}
+# All four choices on one pair of axes
+ggplot(rate_by_decile, aes(x = frl_percentile, group = 1)) +
+    geom_line(aes(y = rate_ignore, color = "ignore NA")) +
+    geom_line(aes(y = rate_zero, color = "NA becomes 0")) +
+    geom_line(aes(y = rate_two, color = "NA becomes 2")) +
+    geom_line(aes(y = rate_random, color = "NA becomes random 0 to 2")) +
+    labs(y = "admission_rate", color = "method")
+```
+
+```{r}
+# Same random imputation, now for attendance rates
+# But also ignore rows with admitted=NA
+set.seed(7342)
+
+attendance_by_decile = df3 %>%
+    filter(!is.na(admitted), !is.na(frl_percentile)) %>%
+    mutate(attended_random = if_else(
+        is.na(attended),
+        sample(0:2, n(), replace = TRUE),
+        attended
+    )) %>%
+    group_by(frl_percentile) %>%
+    summarize(attended_random = sum(attended_random), admitted = sum(admitted)) %>%
+    mutate(attendance_rate = attended_random / admitted)
+
+ggplot(attendance_by_decile, aes(x = frl_percentile, y = attendance_rate, group = 1)) +
+    geom_line() +
+    labs(title = "Replace attended=NA with random 0 to 2")
+```
+
+```{r}
+# Same percentile bucketing, but for distance to UC Berkeley
+df3 = df3 %>%
+    mutate(dist_percentile_raw = percent_rank(dist_to_ucb_miles)) %>%
+    mutate(dist_percentile = cut(
+        dist_percentile_raw,
+        breaks = c(0, 0.25, 0.5, 0.75, 1),
+        labels = c("0-25", "25-50", "50-75", "75-100"),
+        include.lowest = TRUE
+    ))
+df3
+```
+
+```{r}
+# Group by two variables at once
+df3_grouped = df3 %>%
+    group_by(frl_percentile, dist_percentile) %>%
+    summarize(applied = sum(applied), grade_12 = sum(grade_12), .groups = "drop") %>%
+    mutate(app_rate = applied / grade_12) %>% 
+    filter(! is.na(frl_percentile))
+
+df3_grouped
+```
+
+
+```{r}
+# One line per distance bucket
+ggplot(df3_grouped, aes(
+    x = frl_percentile,
+    y = app_rate,
+    color = dist_percentile,
+    group = dist_percentile
+)) +
+    geom_line()
+```
+
+```{r}
+# Build filtered dataset: bigger, non-charter schools only
+# df3 already has app_rate, so we only need the distance buckets here
+df3_scatter = df3 %>%
+    filter(tot_enrolled >= 100, is_charter == "N") %>%
+    drop_na(pct_free_reduced, app_rate) %>%
+    mutate(dist_to_ucb_bucket = ntile(dist_to_ucb_miles, 5)) %>%
+    mutate(dist_to_ucb_bucket = factor(
+        dist_to_ucb_bucket,
+        labels = c(
+            "1st (0-20%)", "2nd (20-40%)", "3rd (40-60%)",
+            "4th (60-80%)", "5th (80-100%)"
+        )
+    ))
+
+nrow(df3_scatter)
+count(df3_scatter, dist_to_ucb_bucket)
+```
+
+```{r}
+# One scatter plot panel per distance quintile
+ggplot(df3_scatter, aes(x = pct_free_reduced, y = app_rate, size = grade_12)) +
+    geom_point(alpha=0.3) +
+    facet_wrap(~dist_to_ucb_bucket, ncol = 3, scales = "free_x") +
+    labs(x = "free_reduced_percentage", y = "app_rate", size = "grade_12")
+```
