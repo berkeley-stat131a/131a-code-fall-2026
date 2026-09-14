@@ -1,16 +1,21 @@
 library(shiny)
-library(tidyverse)
 
-ui = fluidPage(
-  titlePanel("STAT 131A Parametric sampling distribution simulation"),
-  hr(style="border-color: grey;"),
+SIMULATION_INTERVALS <- c(
+  Slow = 10000,
+  Normal = 3000,
+  Fast = 200,
+  "Super Fast" = 50
+)
+
+ui <- fluidPage(
+  titlePanel("STAT 131A Parallel Universe Simulator"),
+  hr(style = "border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
       selectInput(
         inputId = "dist",
         label = "Data distribution",
         choices = c("Bernoulli", "Uniform", "Normal")
-        # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
       ),
       conditionalPanel(
         condition = "input.dist == 'Bernoulli'",
@@ -23,7 +28,7 @@ ui = fluidPage(
         )
       ),
       conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
+        condition = "input.dist == 'Uniform'",
         numericInput(
           inputId = "a",
           label = "Minimum ( a )",
@@ -31,7 +36,7 @@ ui = fluidPage(
         )
       ),
       conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
+        condition = "input.dist == 'Uniform'",
         numericInput(
           inputId = "b",
           label = "Maximum ( b )",
@@ -39,7 +44,7 @@ ui = fluidPage(
         )
       ),
       conditionalPanel(
-        condition = "input.dist == 'Normal'", 
+        condition = "input.dist == 'Normal'",
         numericInput(
           inputId = "m",
           label = "Mean ( \u03bc )",
@@ -47,42 +52,14 @@ ui = fluidPage(
         )
       ),
       conditionalPanel(
-        condition = "input.dist == 'Normal'", 
+        condition = "input.dist == 'Normal'",
         numericInput(
           inputId = "sd",
           label = "Standard Deviation ( \u03c3 )",
-          value = 1
+          value = 1,
+          min = 0
         )
       ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Binomial'", 
-      #   numericInput(
-      #     inputId = "size",
-      #     label = "Number of trials",
-      #     value = 10,
-      #     min = 1
-      #   )
-      # ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Binomial'", 
-      #   numericInput(
-      #     inputId = "binom_prob",
-      #     label = "Probability of success",
-      #     value = 0.5,
-      #     min = 0,
-      #     max = 1
-      #   )
-      # ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Geometric'", 
-      #   numericInput(
-      #     inputId = "geom_prob",
-      #     label = "Probability of success",
-      #     value = 0.5,
-      #     min = 0,
-      #     max = 1
-      #   )
-      # ),
       numericInput(
         inputId = "n",
         label = "Sample size",
@@ -92,318 +69,150 @@ ui = fluidPage(
       selectInput(
         inputId = "speed",
         label = "Simulation Speed",
-        choices = c("Slow", "Normal", "Fast"),
+        choices = names(SIMULATION_INTERVALS),
         selected = "Normal"
       ),
-      
-     hr(style="border-color: grey;"),
-     fluidRow(
-       column(width=7,actionButton("reset","Reset")),
-       column(width=7,actionButton("stop","Stop")),
-       column(width=7,actionButton("play","Play"))
-     )
+      hr(style = "border-color: grey;"),
+      fluidRow(
+        column(width = 4, actionButton("reset", "Reset")),
+        column(width = 4, actionButton("stop", "Stop")),
+        column(width = 4, actionButton("play", "Play"))
+      )
     ),
-    
-    # plot panel
     mainPanel(
-      
-      plotOutput(outputId='data_dist'),
-      plotOutput(outputId='sampling_dist'),
-      
-      # # tab layout
-      # tabsetPanel(
-      #   
-      #   tabPanel(
-      #     title="Distribution",
-      #     plotOutput(outputId='mygraph')
-      #   ),
-      #   # tabPanel("Summary",
-      #   #          
-      #   #          # plots on same row
-      #   #          fluidRow(
-      #   #            
-      #   #            column(6,
-      #   #                   
-      #   #                   plotOutput('voltrack')
-      #   #            ),
-      #   #            column(6,
-      #   #                   plotOutput('pie')  
-      #   #            )
-      #   #            
-      #   #          )
-      #   #          
-      #   # )
-      # ),
-      
-      # # visual data on same row
-      # fluidRow(
-      #   column(width=1,textOutput("curr_sim")),
-      #   column(width=1,textOutput("curr_mean")),
-      #   column(width=9,textOutput("curr_sample"))
-      # )
-      
+      plotOutput(outputId = "data_dist"),
+      plotOutput(outputId = "sampling_dist")
     )
   )
-  
 )
 
-server = function(input,output){
-  
-  # reactive to store all reactive variables
-  var_list = reactiveValues() 
-  
-  # current simulation (i.e., sample) number
-  var_list$curr_sim = 1
-  
-  var_list$resetindicator = 0  
-  
-  # stored the current sample
-  var_list$curr_sample = NA
-  
-  # stores the current mean of the sample
-  var_list$curr_mean = NA
-  
-  # initialize a big vector to store means
-  var_list$mean_vec = rep(NA, 10000)
+server <- function(input, output, session) {
+  state <- reactiveValues(
+    playing = FALSE,
+    curr_sample = NULL,
+    curr_mean = NA_real_,
+    mean_vec = numeric()
+  )
 
-  
-  forward = function() {
-    
-    req(input$dist)
-    req(input$p)
-    req(input$a)
-    req(input$b)
-    req(input$n)
-    req(input$speed)
+  simulation_number <- reactive(length(state$mean_vec))
 
-    if (input$dist=="Bernoulli") {
-      
-      var_list$curr_sample = rbinom(n=input$n, size=1, prob=input$p)
-      
-    } else if (input$dist=="Uniform"){ 
-      
-      var_list$curr_sample = runif(n=input$n, min=input$a, max=input$b)
-      
-    } else if (input$dist=="Normal") {
-      
-      var_list$curr_sample = rnorm(n=input$n, mean=input$m, sd=input$sd)
-      
-    } else if (input$dist=="Binomial") {
-      
-      var_list$curr_sample = rbinom(n=input$n, size=input$size, prob=input$binom_prob)
-      
-    } else if (input$dist=="Geometric") {
-      
-      var_list$curr_sample = rgeom(n=input$n, prob=input$geom_prob)
-      
-    }
-    
-    var_list$curr_mean = mean(var_list$curr_sample)
-    
-    var_list$mean_vec[var_list$curr_sim] = var_list$curr_mean
-    
-    var_list$curr_sim = var_list$curr_sim + 1
-    
+  plot_limits <- reactive({
+    switch(
+      input$dist,
+      Bernoulli = c(0, 1),
+      Uniform = {
+        req(input$a < input$b)
+        c(input$a, input$b)
+      },
+      Normal = {
+        req(input$sd > 0)
+        input$m + c(-3, 3) * input$sd
+      }
+    )
+  })
+
+  draw_sample <- function() {
+    req(input$dist, input$n, input$n >= 1)
+
+    sample_values <- switch(
+      input$dist,
+      Bernoulli = {
+        req(input$p >= 0, input$p <= 1)
+        rbinom(input$n, size = 1, prob = input$p)
+      },
+      Uniform = {
+        req(input$a < input$b)
+        runif(input$n, min = input$a, max = input$b)
+      },
+      Normal = {
+        req(input$sd > 0)
+        rnorm(input$n, mean = input$m, sd = input$sd)
+      }
+    )
+
+    sample_mean <- mean(sample_values)
+    state$curr_sample <- sample_values
+    state$curr_mean <- sample_mean
+    state$mean_vec <- c(state$mean_vec, sample_mean)
   }
 
-  session = reactiveValues()
-  session$timer = reactiveTimer(Inf)
-  
-  # handles the time steps of the animation
-  observeEvent(
-    eventExpr=input$play,
-    handlerExpr={
-      session$timer=reactiveTimer(
-        intervalMs = 
-          if (input$speed == 'Slow') {
-            10000
-          } else if (input$speed == 'Normal') {
-            3000
-          } else if (input$speed == 'Fast') {
-            200
-          }
-      )
-      observeEvent(
-        eventExpr=session$timer(),
-        handlerExpr={
-          forward()
-        }
-      )
-    }
-  )
-
-  # handles the stop button
-  observeEvent(
-    eventExpr=input$stop,
-    handlerExpr={
-      # resets the timer
-      session$timer = reactiveTimer(Inf)
-    }
-  )
-
-  ## handles the reset button (sets everything to original values)
-  observeEvent(
-    eventExpr=input$reset,
-    handlerExpr={
-    
-      var_list$curr_sim = 1
-      
-      var_list$resetindicator = 0   # used to change button labels
-      
-      var_list$curr_sample = NA
-      var_list$curr_mean = NA
-      
-      var_list$mean_vec = rep(NA, 10000)
-      
-      session$timer = reactiveTimer(Inf)
-    }
-  )
-  
-  # data distribution
-  output$data_dist = renderPlot({
-    
-    if (is.na(var_list$curr_sample[1])) {
-      
-      # don't render if no data
-      return()
-      
-    } else {
-      
-      xmin = if (input$dist == "Bernoulli") {
-        0
-      } else if (input$dist == "Uniform") {
-        input$a
-      } else if (input$dist == "Geometric") {
-        0
-      } else if (input$dist == "Binomial") {
-        0
-      } else if (input$dist == "Normal") {
-        input$m - 3*input$sd
-      }
-      
-      xmax = if (input$dist == "Bernoulli") {
-        1
-      } else if (input$dist == "Uniform") {
-        input$b
-      } else if (input$dist == "Geometric") {
-        10
-      } else if (input$dist == "Binomial") {
-        input$size
-      } else if (input$dist == "Normal") {
-        input$m + 3*input$sd
-      }
-      
-      hist(
-        var_list$curr_sample,
-        xlim = c(xmin, xmax),
-        main = paste0('Distribution of random sample #', var_list$curr_sim),
-        xlab = 'Values from a single random sample'
-      )
-      
-      # add a vertical line at the sample mean
-      abline(v=var_list$curr_mean, col="red")
-      
-      sample_sd = sd(var_list$curr_sample)
-      
-      # write the sample mean and SD above the plot
-      mtext(side=3, text=paste0(
-        "Sample mean: ", 
-        round(var_list$curr_mean, 3),
-        "    ",
-        "Sample standard deviation (SD): ", 
-        round(sample_sd, 3),
-        "    ",
-        "Sample size (n): ",
-        input$n
-        # "    ",
-        # "SD / √n: ",
-        # round(sample_sd / sqrt(input$n), 3)
-      ))
-    
-    }
-    
+  observeEvent(input$play, {
+    state$playing <- TRUE
   })
-  
-  output$sampling_dist<-renderPlot({
-    
-    if (is.na(var_list$mean_vec[1])) {
-      # don't render if no data
-      return()
-    } else {
-      
-      xmin = if (input$dist == "Bernoulli") {
-        0
-      } else if (input$dist == "Uniform") {
-        input$a
-      } else if (input$dist == "Geometric") {
-        0
-      } else if (input$dist == "Binomial") {
-        0
-      } else if (input$dist == "Normal") {
-        input$m - 3*input$sd
-      }
-      
-      xmax = if (input$dist == "Bernoulli") {
-        1
-      } else if (input$dist == "Uniform") {
-        input$b
-      } else if (input$dist == "Geometric") {
-        10
-      } else if (input$dist == "Binomial") {
-        input$size
-      } else if (input$dist == "Normal") {
-        input$m + 3*input$sd
-      }
-      
-      hist(
-        var_list$mean_vec,
-        xlim = c(xmin, xmax),
-        main = 'A growing sampling distribution',
-        xlab = paste('Sample means from', var_list$curr_sim, 'random samples')
-      )
-      
-      # add a vertical line at the sampling distrbution mean
-      abline(v=mean(var_list$mean_vec, na.rm=TRUE), col="blue", lwd=3)
-      
-      # write the sample mean and SD above the plot
-      mtext(side=3, text=paste0(
-        "Mean of sampling distribution: ", 
-        round(mean(var_list$mean_vec, na.rm=TRUE), 3),
-        "    ",
-        "Std. dev. of sampling distribution (Std. error): ", 
-        round(sd(var_list$mean_vec, na.rm=TRUE), 3),
-        "    ",
-        "Number of sample means plotted: ",
-        var_list$curr_sim
-      ))
-    }
-    
+
+  observeEvent(input$stop, {
+    state$playing <- FALSE
   })
-  
-  # ## visual data outputs
-  # output$curr_sim = renderText({
-  #   paste("Simulation number: ", var_list$curr_sim)
-  # })
-  
-  
-  
-  # ## pie plot output
-  # output$pie<-renderPlot({
-  #   if(sum(waits$slices)==0){
-  #     return() # dont error if no data
-  #   }
-  #   par(xpd=TRUE) # allow legend outside plot margins
-  #   pie(waits$slices,labels = waits$slices,col=c("green3","yellow2","red2"))
-  #   legend(-1.3,-0.5,legend=c("<26","26 to 25","36 +"),fill=c("green3","yellow2","red2"),bty='n',cex=0.8)
-  # })
-  # 
-  # output$voltrack<-renderPlot({
-  #   ytop<-max(waits$trackvol)+100 # upper limit for y axis
-  #   plot(waits$trackvol,type='l',ylab="Waitlist Volume",xaxt='n',xlab="Week Number",bty='n',lwd=1.5,ylim=c(0,ytop),main="20 Week Volume")
-  #   points(20,tail(waits$trackvol,1),pch=21,bg="blue")
-  #   axis(1,at=1:20,labels = waits$xdates)
-  # })
-  
+
+  observeEvent(input$reset, {
+    state$playing <- FALSE
+    state$curr_sample <- NULL
+    state$curr_mean <- NA_real_
+    state$mean_vec <- numeric()
+  })
+
+  observe({
+    req(state$playing)
+    req(input$speed %in% names(SIMULATION_INTERVALS))
+
+    invalidateLater(SIMULATION_INTERVALS[[input$speed]], session)
+    isolate(draw_sample())
+  })
+
+  output$data_dist <- renderPlot({
+    req(state$curr_sample)
+
+    sample_values <- state$curr_sample
+    sample_mean <- state$curr_mean
+    sample_sd <- sd(sample_values)
+    limits <- plot_limits()
+
+    hist(
+      sample_values,
+      xlim = limits,
+      main = paste0("Distribution of random sample #", simulation_number()),
+      xlab = "Values from a single random sample"
+    )
+
+    abline(v = sample_mean, col = "red")
+
+    mtext(
+      side = 3,
+      text = paste0(
+        "Sample mean: ", round(sample_mean, 3),
+        "    Sample standard deviation (SD): ", round(sample_sd, 3),
+        "    Sample size (n): ", length(sample_values)
+      )
+    )
+  })
+
+  output$sampling_dist <- renderPlot({
+    req(length(state$mean_vec) > 0)
+
+    means <- state$mean_vec
+    sampling_mean <- mean(means)
+    sampling_sd <- sd(means)
+    limits <- plot_limits()
+
+    hist(
+      means,
+      xlim = limits,
+      main = "A growing sampling distribution",
+      xlab = paste("Sample means from", length(means), "random samples")
+    )
+
+    abline(v = sampling_mean, col = "blue", lwd = 3)
+
+    mtext(
+      side = 3,
+      text = paste0(
+        "Mean of sampling distribution: ", round(sampling_mean, 3),
+        "    Std. dev. of sampling distribution (Std. error): ",
+        round(sampling_sd, 3),
+        "    Number of sample means plotted: ", length(means)
+      )
+    )
+  })
 }
 
-runApp(shinyApp(ui,server),launch.browser = TRUE)
+runApp(shinyApp(ui, server), launch.browser = TRUE)
