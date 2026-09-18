@@ -4,7 +4,7 @@ library(tidyverse)
 INF_EQUIVALENT = 20000
 
 ui = fluidPage(
-  titlePanel("STAT 131A Parametric boostrap simulation"),
+  titlePanel("STAT 131A Parametric bootstrap simulation"),
   hr(style="border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
