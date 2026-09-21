@@ -420,7 +420,7 @@ server = function(input,output){
         var_list$orig_sample,
         xlim = c(xmin, xmax),
         main = paste0('Distribution of data in original sample (observed)'),
-        xlab = 'Raw values from original sample'
+        xlab = 'Possible values of random variable'
       )
       
       estimate = var_list$estimator_func(var_list$orig_sample)

@@ -309,7 +309,7 @@ server = function(input,output){
         var_list$curr_sample,
         xlim = c(xmin, xmax),
         main = paste0('Distribution of random sample #', var_list$curr_sim),
-        xlab = 'Values from a single random sample'
+        xlab = 'Possible values of random variable'
       )
       
       # add a vertical line at the true mean
@@ -366,7 +366,7 @@ server = function(input,output){
         var_list$real_density,
         xlim = c(xmin, xmax),
         main = paste0('Sampling distribution of estimator given n=', input$n),
-        xlab = 'Estimates',
+        xlab = 'Possible values of estimator',
         lwd = 2
       )
       
