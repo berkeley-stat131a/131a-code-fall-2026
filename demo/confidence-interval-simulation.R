@@ -1,5 +1,4 @@
 library(shiny)
-library(tidyverse)
 
 INF_EQUIVALENT = 10000
 MAX_SIM = 10000
@@ -97,6 +96,18 @@ ui = fluidPage(
   
 )
 
+# Bound temporary allocations while simulating the reference sample means.
+# Consecutive batches retain the same random-draw order as one large matrix.
+simulate_means = function(draw, n, count, max_values = 1000000) {
+  batch_size = max(1, floor(max_values / n))
+  means = numeric(count)
+  for (first in seq.int(1, count, by = batch_size)) {
+    last = min(first + batch_size - 1, count)
+    means[first:last] = colMeans(matrix(draw(n * (last - first + 1)), nrow = n))
+  }
+  means
+}
+
 reset_vars = function(var_list) {
   # current simulation (i.e., sample) number
   var_list$curr_sim = 0
@@ -130,7 +141,8 @@ reset_vars = function(var_list) {
   
   var_list$contains_true_mean = NA
   
-  var_list$contains_true_mean_vec = rep(NA, 10000)
+  var_list$contains_true_mean_vec = NA
+  var_list$coverage = NA
 }
 
 forward = function(var_list, input) {
@@ -145,15 +157,17 @@ forward = function(var_list, input) {
   req(input$cl)
   req(input$speed)
   
+  if (var_list$curr_sim >= MAX_SIM) return(invisible(NULL))
+
   # initialize true sampling distribution
   if (is.na(var_list$real_estimates[1])) {
     
     if (input$dist=="Bernoulli") {
       
-      var_list$real_estimates = colMeans(matrix(
-        rbinom(INF_EQUIVALENT * input$n, size=1, prob=input$p),
-        nrow = input$n
-      ))
+      var_list$real_estimates = simulate_means(
+        function(count) rbinom(count, size=1, prob=input$p),
+        input$n, INF_EQUIVALENT
+      )
       
       var_list$true_mean = input$p
       
@@ -164,10 +178,10 @@ forward = function(var_list, input) {
       
     } else if (input$dist=="Uniform") { 
       
-      var_list$real_estimates = colMeans(matrix(
-        runif(INF_EQUIVALENT * input$n, min=input$a, max=input$b),
-        nrow = input$n
-      ))
+      var_list$real_estimates = simulate_means(
+        function(count) runif(count, min=input$a, max=input$b),
+        input$n, INF_EQUIVALENT
+      )
       
       var_list$true_mean = (input$a + input$b) / 2
       
@@ -177,10 +191,10 @@ forward = function(var_list, input) {
       )
       
     } else if (input$dist=="Normal") {
-      var_list$real_estimates = colMeans(matrix(
-        rnorm(INF_EQUIVALENT * input$n, mean=input$m, sd=input$sd),
-        nrow = input$n
-      ))
+      var_list$real_estimates = simulate_means(
+        function(count) rnorm(count, mean=input$m, sd=input$sd),
+        input$n, INF_EQUIVALENT
+      )
       
       var_list$true_mean = input$m
       
@@ -198,11 +212,14 @@ forward = function(var_list, input) {
     var_list$real_density = density(var_list$real_estimates, adjust = 5)
     
     alpha = 1 - input$cl
-    var_list$ci_lower = var_list$means - qnorm(1 - alpha/2) * var_list$se
-    var_list$ci_upper = var_list$means + qnorm(1 - alpha/2) * var_list$se
+    margin = qnorm(1 - alpha/2) * var_list$se
+    var_list$ci_lower = var_list$means - margin
+    var_list$ci_upper = var_list$means + margin
     var_list$contains_true_mean_vec = 
       (var_list$true_mean > var_list$ci_lower) &
       (var_list$true_mean < var_list$ci_upper)
+    var_list$coverage = cumsum(var_list$contains_true_mean_vec) /
+      seq_along(var_list$contains_true_mean_vec)
   }
   
   if (input$speed=="Standard") {
@@ -213,6 +230,8 @@ forward = function(var_list, input) {
     samples_per_iter = 10
   }
   
+  var_list$curr_sim = min(var_list$curr_sim + samples_per_iter, MAX_SIM)
+
   var_list$curr_sample = var_list$samples_to_iter[, var_list$curr_sim]
   var_list$curr_mean = var_list$means[var_list$curr_sim]
   var_list$curr_ci = c(
@@ -221,64 +240,47 @@ forward = function(var_list, input) {
   )
   var_list$contains_true_mean = var_list$contains_true_mean_vec[var_list$curr_sim]
   
-  var_list$curr_sim = var_list$curr_sim + samples_per_iter
 }
   
   
 
-server = function(input,output){
+server = function(input, output, session){
   
   # reactive to store all reactive variables
   var_list = reactiveValues() 
   
   reset_vars(var_list)
 
-  session = reactiveValues()
-  session$timer = reactiveTimer(Inf)
-  
-  # handles the time steps of the animation
-  observeEvent(
-    eventExpr=input$play,
-    handlerExpr={
-      session$timer=reactiveTimer(
-        intervalMs = 
-          if (input$speed == 'Standard') {
-            3000
-          } else if (input$speed == 'Fast') {
-            300
-          } else if (input$speed == 'Super fast') {
-            300
-          }
-      )
-      observeEvent(
-        eventExpr=session$timer(),
-        handlerExpr={
-          forward(var_list, input)
-        }
-      )
-    }
-  )
+  running = reactiveVal(FALSE)
 
-  # handles the stop button
-  observeEvent(
-    eventExpr=input$stop,
-    handlerExpr={
-      # resets the timer
-      session$timer = reactiveTimer(Inf)
-    }
-  )
+  observeEvent(input$play, {
+    if (var_list$curr_sim < MAX_SIM) running(TRUE)
+  })
 
-  ## handles the reset button (sets everything to original values)
-  observeEvent(
-    eventExpr=input$reset,
-    handlerExpr={
-      
-      session$timer = reactiveTimer(Inf)
-      
-      reset_vars(var_list)
-    }
-  )
-  
+  observeEvent(input$stop, {
+    running(FALSE)
+  })
+
+  observeEvent(input$reset, {
+    running(FALSE)
+    reset_vars(var_list)
+  })
+
+  # One observer for the session; Play never creates another timer observer.
+  observe({
+    req(running())
+    interval = isolate({
+      forward(var_list, input)
+      if (var_list$curr_sim >= MAX_SIM) {
+        running(FALSE)
+        NULL
+      } else {
+        if (input$speed == "Standard") 3000 else 300
+      }
+    })
+    if (!is.null(interval)) invalidateLater(interval, session)
+  })
+
   # data distribution
   output$data_dist = renderPlot({
     
@@ -425,7 +427,7 @@ server = function(input,output){
       # don't render if no data
       return()
     } else {
-      running_coverage = mean(var_list$contains_true_mean_vec[1:var_list$curr_sim])
+      running_coverage = var_list$coverage[var_list$curr_sim]
     
       paste0(
         "Proportion of ",
