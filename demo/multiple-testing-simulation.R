@@ -15,7 +15,7 @@ ui = fluidPage(
     .well .selectize-input { min-height: 28px; padding: 3px 8px; }
     .well .row .btn { padding: 3px 10px; }
   "))),
-  titlePanel("STAT 131A Hypothesis test simulation"),
+  titlePanel("STAT 131A Multiple testing simulation"),
   hr(style="border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
@@ -154,11 +154,7 @@ ui = fluidPage(
       
       uiOutput(outputId='running_summary'),
       plotOutput(outputId='data_dist', height='200px'),
-      # for Bernoulli the estimated null sampling distribution is exact, so only show that one
-      conditionalPanel(
-        condition = "input.dist != 'Bernoulli'",
-        plotOutput(outputId='sampling_dist', height='200px')
-      ),
+      plotOutput(outputId='sampling_dist', height='200px'),
       plotOutput(outputId='est_sampling_dist', height='200px'),
       
     )
@@ -192,6 +188,17 @@ sampling_xlim = function(input) {
   }
 }
 
+# exact null distribution of a Bernoulli sample proportion: each possible value k/n,
+# its probability under H0, and its exact two-sided p-value
+bernoulli_null_dist = function(p0, n) {
+  support = (0:n) / n
+  prob = dbinom(0:n, size = n, prob = p0)
+  dev = abs(support - p0)
+  # tolerance guards against floating point error when comparing distances
+  p_value = vapply(dev, function(d) sum(prob[dev >= d - 1e-9]), numeric(1))
+  list(support = support, prob = prob, p_value = p_value)
+}
+
 # small arrow below the x axis of the current plot, pointing up at x
 arrow_below_axis = function(x, col) {
   usr = par("usr")
@@ -220,15 +227,13 @@ reset_vars = function(var_list) {
   
   # null mean and cached density of the null sampling distribution
   var_list$null_mean = NA
-  var_list$null_density = NA
-  var_list$null_estimates = NA
   
   # running proportion of rejected tests, using the true null distribution
   # and the estimated (s / sqrt(n)) null distribution
   var_list$reject_true_prop = NA
   var_list$reject_est_prop = NA
   
-  # stores the se from the simulated null sampling distribution
+  # theoretical SE of the null sampling distribution
   var_list$null_se = NA
   
   # stored the current sample
@@ -333,44 +338,37 @@ forward = function(var_list, input) {
     
     # cache density of sampling distribution for rendering
     # sample proportions must stay within [0, 1], so don't let the density extend past it
-    density_range = if (input$dist == "Bernoulli") list(from = 0, to = 1) else list()
+    # (Bernoulli means sit on a 1/n grid, so they need extra smoothing; the
+    # continuous cases use the default bandwidth so the curve's width matches the SE)
+    density_range = if (input$dist == "Bernoulli") {
+      list(from = 0, to = 1, adjust = 5)
+    } else {
+      list(adjust = 1)
+    }
     var_list$real_density = do.call(
-      density, c(list(var_list$real_estimates, adjust = 5), density_range)
+      density, c(list(var_list$real_estimates), density_range)
     )
     
-    # simulate the sampling distribution under the null hypothesis
+    # theoretical mean and SE of the sample mean under the null hypothesis
     if (input$dist=="Bernoulli") {
-      null_estimates = simulate_means(
-        function(count) rbinom(count, size=1, prob=input$null_p),
-        input$n, INF_EQUIVALENT
-      )
       var_list$null_mean = input$null_p
+      var_list$null_se = sqrt(input$null_p * (1 - input$null_p) / input$n)
     } else if (input$dist=="Uniform") {
-      null_estimates = simulate_means(
-        function(count) runif(count, min=0, max=2 * input$null_u_mean),
-        input$n, INF_EQUIVALENT
-      )
+      # Uniform(0, b) has SD b / sqrt(12), with b = 2 * mean
       var_list$null_mean = input$null_u_mean
+      var_list$null_se = 2 * input$null_u_mean / sqrt(12 * input$n)
     } else if (input$dist=="Normal") {
-      null_estimates = simulate_means(
-        function(count) rnorm(count, mean=input$null_m, sd=input$sd),
-        input$n, INF_EQUIVALENT
-      )
       var_list$null_mean = input$null_m
+      var_list$null_se = input$sd / sqrt(input$n)
     }
-    var_list$null_estimates = null_estimates
-    var_list$null_se = sd(null_estimates)
-    var_list$null_density = do.call(
-      density, c(list(null_estimates, adjust = 5), density_range)
-    )
     
     # run the hypothesis test on every simulated sample
     dev_from_null = abs(var_list$means - var_list$null_mean)
-    null_devs = sort(abs(null_estimates - var_list$null_mean))
     
-    # p-value from the simulated null distribution: P(|null estimate - null mean| >= deviation)
-    p_true = 1 - findInterval(dev_from_null, null_devs, left.open = TRUE) / length(null_devs)
+    # p-value from the theoretical null distribution N(null mean, true null SE)
+    p_true = 2 * pnorm(-dev_from_null / var_list$null_se)
     reject_true = p_true < input$alpha
+    reject_true[is.na(reject_true)] = FALSE
     
     # p-value from N(null mean, s / sqrt(n)), with s from each sample
     sample_sds = sqrt(pmax(
@@ -379,9 +377,13 @@ forward = function(var_list, input) {
     p_est = 2 * pnorm(-dev_from_null / (sample_sds / sqrt(input$n)))
     reject_est = p_est < input$alpha
     reject_est[is.na(reject_est)] = FALSE
-    # for Bernoulli the null sampling distribution is known exactly, so the
-    # estimated null distribution is identical to the true one
-    if (input$dist == "Bernoulli") reject_est = reject_true
+    if (input$dist == "Bernoulli") {
+      # the estimated test uses the normal approximation N(p_H0, sqrt(p_H0 (1 - p_H0) / n)),
+      # which is what reject_true holds so far; the true test uses the exact Binomial
+      reject_est = reject_true
+      exact = bernoulli_null_dist(input$null_p, input$n)
+      reject_true = exact$p_value[round(var_list$means * input$n) + 1] < input$alpha
+    }
     
     var_list$reject_true_prop = cumsum(reject_true) / seq_along(reject_true)
     var_list$reject_est_prop = cumsum(reject_est) / seq_along(reject_est)
@@ -389,8 +391,13 @@ forward = function(var_list, input) {
     alpha = input$alpha
     margin = qnorm(1 - alpha/2) * var_list$se
     
-    # for Uniform and Normal, also build the CI with the SE estimated from each sample
-    var_list$est_ses = sample_sds / sqrt(input$n)
+    # also build the CI with the SE estimated from each sample:
+    # sqrt(p_hat (1 - p_hat) / n) for Bernoulli, s / sqrt(n) otherwise
+    var_list$est_ses = if (input$dist == "Bernoulli") {
+      sqrt(var_list$means * (1 - var_list$means) / input$n)
+    } else {
+      sample_sds / sqrt(input$n)
+    }
     margin_est = qnorm(1 - alpha/2) * var_list$est_ses
     var_list$ci_est_lower = var_list$means - margin_est
     var_list$ci_est_upper = var_list$means + margin_est
@@ -422,21 +429,12 @@ forward = function(var_list, input) {
 
   var_list$curr_sample = var_list$samples_to_iter[, var_list$curr_sim]
   var_list$curr_mean = var_list$means[var_list$curr_sim]
-  if (input$dist == "Bernoulli") {
-    # the SE is known exactly, so there is only one confidence interval
-    var_list$curr_ci = c(
-      var_list$ci_lower[var_list$curr_sim],
-      var_list$ci_upper[var_list$curr_sim]
-    )
-    var_list$contains_true_mean = var_list$contains_true_mean_vec[var_list$curr_sim]
-  } else {
-    # only show the CI constructed with the (incorrectly) estimated SE
-    var_list$curr_ci = c(
-      var_list$ci_est_lower[var_list$curr_sim],
-      var_list$ci_est_upper[var_list$curr_sim]
-    )
-    var_list$contains_true_mean = var_list$contains_true_mean_est_vec[var_list$curr_sim]
-  }
+  # only show the CI constructed with the (incorrectly) estimated SE
+  var_list$curr_ci = c(
+    var_list$ci_est_lower[var_list$curr_sim],
+    var_list$ci_est_upper[var_list$curr_sim]
+  )
+  var_list$contains_true_mean = var_list$contains_true_mean_est_vec[var_list$curr_sim]
   
 }
   
@@ -481,6 +479,20 @@ server = function(input, output, session){
     running(FALSE)
     reset_vars(var_list)
   })
+
+  # samples are generated once per run, so changing any data-generation or testing
+  # input stops and resets the run rather than mixing old samples with new settings
+  observeEvent(
+    list(
+      input$dist, input$true_p, input$true_u_mean, input$true_m, input$sd, input$n,
+      input$null_p, input$null_u_mean, input$null_m, input$alpha
+    ),
+    {
+      running(FALSE)
+      reset_vars(var_list)
+    },
+    ignoreInit = TRUE
+  )
 
   # One observer for the session; Play never creates another timer observer.
   observe({
@@ -568,58 +580,93 @@ server = function(input, output, session){
     } else {
       
       xlim = sampling_xlim(input)
+      null_mean = var_list$null_mean
+      main = paste0('True null sampling distribution of estimator given n=', input$n)
       
-      # true null sampling distribution
-      plot(
-        var_list$null_density,
-        xlim = xlim,
-        main = paste0('True null sampling distribution of estimator given n=', input$n),
-        xlab = 'Possible values of estimator',
-        col = "blue",
-        lwd = 2
-      )
+      # distance of the point estimate from the null mean
+      dist_from_null = abs(var_list$curr_mean - null_mean)
+      shade_col = adjustcolor("blue", alpha.f = 0.2)
+      boundary_col = adjustcolor("black", alpha.f = 0.25)
       
-      # add a small arrow below the x axis pointing at the null mean
-      arrow_below_axis(var_list$null_mean, "blue")
-      
-      # very light dashed lines at the rejection region boundaries
-      reject_dist = quantile(abs(var_list$null_estimates - var_list$null_mean), 1 - input$alpha)
-      abline(
-        v = var_list$null_mean + c(-1, 1) * reject_dist,
-        col = adjustcolor("black", alpha.f = 0.25), lty = 2
-      )
-      
-      p_value = NA
-      if (!is.na(var_list$curr_mean)) {
-        # distance of the point estimate from the null mean
-        dist_from_null = abs(var_list$curr_mean - var_list$null_mean)
+      if (input$dist == "Bernoulli") {
+        # exact Binomial distribution: one bar for each possible sample proportion
+        exact = bernoulli_null_dist(input$null_p, input$n)
+        in_tail = abs(exact$support - null_mean) >= dist_from_null - 1e-9
+        bar_half_width = 0.4 / input$n
+        
+        plot(
+          NA,
+          xlim = xlim,
+          ylim = c(0, max(exact$prob)),
+          main = main,
+          xlab = 'Possible values of estimator',
+          ylab = 'Probability'
+        )
+        # lightly shade the bars at least as far from the null mean as the estimate
+        rect(
+          exact$support - bar_half_width, 0,
+          exact$support + bar_half_width, exact$prob,
+          col = ifelse(in_tail, shade_col, NA),
+          border = "blue"
+        )
+        
+        # very light dashed lines between the last kept and first rejected bar on each side
+        rejected = exact$p_value < input$alpha
+        for (side in c(-1, 1)) {
+          on_side = which(sign(exact$support - null_mean) == side & rejected)
+          if (length(on_side) > 0) {
+            innermost = on_side[which.min(abs(exact$support[on_side] - null_mean))]
+            abline(v = exact$support[innermost] - side * 0.5 / input$n, col = boundary_col, lty = 2)
+          }
+        }
+        
+        # exact two-sided p-value
+        p_value = sum(exact$prob[in_tail])
+      } else {
+        # theoretical N(null mean, true null SE)
+        # (exact for Normal data; the CLT approximation for Uniform data)
+        x = seq(xlim[1], xlim[2], length.out = 1000)
+        y = dnorm(x, mean = null_mean, sd = var_list$null_se)
+        plot(
+          x, y,
+          type = "l",
+          xlim = xlim,
+          main = main,
+          xlab = 'Possible values of estimator',
+          ylab = 'Density',
+          col = "blue",
+          lwd = 2
+        )
+        
+        # very light dashed lines at the rejection region boundaries
+        reject_dist = qnorm(1 - input$alpha/2) * var_list$null_se
+        abline(v = null_mean + c(-1, 1) * reject_dist, col = boundary_col, lty = 2)
         
         # lightly shade the two-sided area under the null sampling distribution
-        dens = var_list$null_density
-        shade_col = adjustcolor("blue", alpha.f = 0.2)
         for (tail_idx in list(
-          which(dens$x <= var_list$null_mean - dist_from_null),
-          which(dens$x >= var_list$null_mean + dist_from_null)
+          which(x <= null_mean - dist_from_null),
+          which(x >= null_mean + dist_from_null)
         )) {
           if (length(tail_idx) > 1) {
             polygon(
-              c(dens$x[tail_idx], rev(dens$x[tail_idx])),
-              c(dens$y[tail_idx], rep(0, length(tail_idx))),
+              c(x[tail_idx], rev(x[tail_idx])),
+              c(y[tail_idx], rep(0, length(tail_idx))),
               col = shade_col, border = NA
             )
           }
         }
         
-        # add a vertical line at the point estimate
-        abline(v=var_list$curr_mean, col="darkgreen", lwd=3)
-        
-        # two-sided p-value from the simulated null sampling distribution
-        p_value = mean(
-          abs(var_list$null_estimates - var_list$null_mean) >= dist_from_null
-        )
+        # two-sided p-value from the theoretical null sampling distribution
+        p_value = 2 * pnorm(-dist_from_null / var_list$null_se)
       }
+      
+      # add a small arrow below the x axis pointing at the null mean
+      arrow_below_axis(null_mean, "blue")
+      
+      # add a vertical line at the point estimate
+      abline(v=var_list$curr_mean, col="darkgreen", lwd=3)
 
-      # write the sample mean and SD above the plot
+      # write the SE and test result above the plot
       # (base graphics use plotmath, R's equivalent of LaTeX, for H_0)
       mtext(side=3, text=bquote(
         .(paste0(
@@ -634,8 +681,8 @@ server = function(input, output, session){
     
   })
   
-  # null sampling distribution estimated from the current sample: N(null mean, s/sqrt(n)),
-  # except for Bernoulli where it is identical to the true null sampling distribution
+  # null sampling distribution estimated with the normal approximation:
+  # N(p_H0, sqrt(p_H0 (1 - p_H0) / n)) for Bernoulli, N(null mean, s / sqrt(n)) otherwise
   output$est_sampling_dist = renderPlot({
     
     if (is.na(var_list$curr_sample[1])) {
@@ -657,45 +704,30 @@ server = function(input, output, session){
     
     xlim = sampling_xlim(input)
     null_mean = var_list$null_mean
-    if (is_bernoulli) {
-      x = var_list$null_density$x
-      y = var_list$null_density$y
-    } else {
-      x = seq(xlim[1], xlim[2], length.out = 1000)
-      y = dnorm(x, mean = null_mean, sd = est_se)
-    }
+    main = paste0('Normally-approximated null sampling distribution of estimator given n=', input$n)
+    dist_from_null = abs(var_list$curr_mean - null_mean)
+    shade_col = adjustcolor("blue", alpha.f = 0.2)
+    boundary_col = adjustcolor("black", alpha.f = 0.25)
+    
+    x = seq(xlim[1], xlim[2], length.out = 1000)
+    y = dnorm(x, mean = null_mean, sd = est_se)
     
     plot(
       x, y,
       type = "l",
       xlim = xlim,
-      main = paste0(
-        if (is_bernoulli) 'Null sampling distribution' else 'Estimated null sampling distribution',
-        ' of estimator given n=', input$n
-      ),
+      main = main,
       xlab = 'Possible values of estimator',
       ylab = 'Density',
       col = "blue",
       lwd = 2
     )
     
-    # add a small arrow below the x axis pointing at the null mean
-    arrow_below_axis(null_mean, "blue")
-    
     # very light dashed lines at the rejection region boundaries
-    reject_dist = if (is_bernoulli) {
-      quantile(abs(var_list$null_estimates - null_mean), 1 - input$alpha)
-    } else {
-      qnorm(1 - input$alpha/2) * est_se
-    }
-    abline(
-      v = null_mean + c(-1, 1) * reject_dist,
-      col = adjustcolor("black", alpha.f = 0.25), lty = 2
-    )
+    reject_dist = qnorm(1 - input$alpha/2) * est_se
+    abline(v = null_mean + c(-1, 1) * reject_dist, col = boundary_col, lty = 2)
     
     # lightly shade the two-sided area under the estimated null distribution
-    dist_from_null = abs(var_list$curr_mean - null_mean)
-    shade_col = adjustcolor("blue", alpha.f = 0.2)
     for (tail_idx in list(
       which(x <= null_mean - dist_from_null),
       which(x >= null_mean + dist_from_null)
@@ -709,14 +741,13 @@ server = function(input, output, session){
       }
     }
     
+    est_p_value = 2 * pnorm(-dist_from_null / est_se)
+    
+    # add a small arrow below the x axis pointing at the null mean
+    arrow_below_axis(null_mean, "blue")
+    
     # add a vertical line at the point estimate
     abline(v=var_list$curr_mean, col="darkgreen", lwd=3)
-    
-    est_p_value = if (is_bernoulli) {
-      mean(abs(var_list$null_estimates - null_mean) >= dist_from_null)
-    } else {
-      2 * pnorm(-dist_from_null / est_se)
-    }
     
     # plotmath is used so the square root is drawn with a radical sign
     se_value = round(
@@ -750,40 +781,22 @@ server = function(input, output, session){
     tagList(
       paste0("Proportion of ", i, " random samples with:"),
       tags$ul(
-        if (input$dist == "Bernoulli") {
-          tags$li(paste0(
-            "A confidence interval that captures the true fixed mean: ",
-            round(var_list$coverage[i], 3)
-          ))
-        } else {
-          tagList(
-            tags$li(paste0(
-              "A confidence interval that SHOULD capture the true fixed mean: ",
-              round(var_list$coverage[i], 3)
-            )),
-            tags$li(paste0(
-              "A confidence interval that ACTUALLY captures the true fixed mean: ",
-              round(var_list$coverage_est[i], 3)
-            ))
-          )
-        },
-        if (input$dist == "Bernoulli") {
-          tags$li(paste0(
-            "A hypothesis test that rejects the null hypothesis: ",
-            round(var_list$reject_est_prop[i], 3)
-          ))
-        } else {
-          tagList(
-            tags$li(paste0(
-              "A hypothesis test that SHOULD reject the null hypothesis: ",
-              round(var_list$reject_true_prop[i], 3)
-            )),
-            tags$li(paste0(
-              "A hypothesis test that ACTUALLY rejects the null hypothesis: ",
-              round(var_list$reject_est_prop[i], 3)
-            ))
-          )
-        }
+        tags$li(paste0(
+          "A confidence interval that SHOULD capture the true fixed mean: ",
+          round(var_list$coverage[i], 3)
+        )),
+        tags$li(paste0(
+          "A confidence interval that ACTUALLY captures the true fixed mean: ",
+          round(var_list$coverage_est[i], 3)
+        )),
+        tags$li(paste0(
+          "A hypothesis test that SHOULD reject the null hypothesis: ",
+          round(var_list$reject_true_prop[i], 3)
+        )),
+        tags$li(paste0(
+          "A hypothesis test that ACTUALLY rejects the null hypothesis: ",
+          round(var_list$reject_est_prop[i], 3)
+        ))
       )
     )
   })
