@@ -4,83 +4,91 @@ INF_EQUIVALENT = 10000
 MAX_SIM = 10000
 
 ui = fluidPage(
+  tags$head(tags$style(HTML("
+    .well { padding: 8px 12px; margin-bottom: 8px; }
+    .well h4 { margin-top: 0; margin-bottom: 6px; }
+    .well .form-group { margin-bottom: 6px; }
+    .well label { margin-bottom: 2px; font-weight: normal; }
+    .well .form-control { height: 28px; padding: 2px 8px; }
+    .well select.form-control { height: 30px; }
+    .well .selectize-input { min-height: 28px; padding: 3px 8px; }
+    .well .row .btn { padding: 3px 10px; }
+  "))),
   titlePanel("STAT 131A Confidence interval simulation"),
   hr(style="border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
-      selectInput(
-        inputId = "dist",
-        label = "Data distribution",
-        choices = c("Bernoulli", "Uniform", "Normal")
-        # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Bernoulli'",
+      wellPanel(
+        h4("Data-generation"),
+        selectInput(
+          inputId = "dist",
+          label = "Data distribution",
+          choices = c("Bernoulli", "Uniform", "Normal")
+          # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Bernoulli'",
+          numericInput(
+            inputId = "p",
+            label = "Probability of success ( p )",
+            value = 0.5,
+            min = 0,
+            max = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Uniform'", 
+          numericInput(
+            inputId = "a",
+            label = "Minimum ( a )",
+            value = 0
+          ),
+          numericInput(
+            inputId = "b",
+            label = "Maximum ( b )",
+            value = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Normal'", 
+          numericInput(
+            inputId = "m",
+            label = "Mean ( \u03bc )",
+            value = 0
+          ),
+          numericInput(
+            inputId = "sd",
+            label = "Standard Deviation ( \u03c3 )",
+            value = 1
+          )
+        ),
         numericInput(
-          inputId = "p",
-          label = "Probability of success ( p )",
-          value = 0.5,
-          min = 0,
-          max = 1
+          inputId = "n",
+          label = "Sample size",
+          value = 30,
+          min = 1
         )
       ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
+      wellPanel(
         numericInput(
-          inputId = "a",
-          label = "Minimum ( a )",
-          value = 0
+          inputId = "cl",
+          label = "Confidence level (1 - \u03b1)",
+          value = 0.95,
+          min = 0.001,
+          max = 0.999
+        ),
+        selectInput(
+          inputId = "speed",
+          label = "Simulation Speed",
+          choices = c("Standard", "Fast", "Super fast"),
+          selected = "Standard"
+        ),
+        fluidRow(
+          column(width=4,actionButton("reset","Reset")),
+          column(width=4,actionButton("stop","Stop")),
+          column(width=4,actionButton("play","Play"))
         )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
-        numericInput(
-          inputId = "b",
-          label = "Maximum ( b )",
-          value = 1
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'", 
-        numericInput(
-          inputId = "m",
-          label = "Mean ( \u03bc )",
-          value = 0
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'", 
-        numericInput(
-          inputId = "sd",
-          label = "Standard Deviation ( \u03c3 )",
-          value = 1
-        )
-      ),
-      numericInput(
-        inputId = "n",
-        label = "Sample size",
-        value = 30,
-        min = 1
-      ),
-      numericInput(
-        inputId = "cl",
-        label = "Confidence level (1 - \u03b1)",
-        value = 0.95,
-        min = 0.001,
-        max = 0.999
-      ),
-      selectInput(
-        inputId = "speed",
-        label = "Simulation Speed",
-        choices = c("Standard", "Fast", "Super fast"),
-        selected = "Standard"
-      ),
-     hr(style="border-color: grey;"),
-     fluidRow(
-       column(width=7,actionButton("reset","Reset")),
-       column(width=7,actionButton("stop","Stop")),
-       column(width=7,actionButton("play","Play"))
-     )
+      )
     ),
     
     # plot panel
@@ -208,8 +216,11 @@ forward = function(var_list, input) {
     
     var_list$se = sd(var_list$real_estimates)
     
-    # cache density of sampling distribution for rendering
-    var_list$real_density = density(var_list$real_estimates, adjust = 5)
+    # cache density of sampling distribution for rendering (default bandwidth, so the
+    # curve's width matches the SE); Bernoulli is drawn as bars instead
+    if (input$dist != "Bernoulli") {
+      var_list$real_density = density(var_list$real_estimates)
+    }
     
     alpha = 1 - input$cl
     margin = qnorm(1 - alpha/2) * var_list$se
@@ -227,7 +238,7 @@ forward = function(var_list, input) {
   } else if (input$speed=="Fast") {
     samples_per_iter = 1
   } else if (input$speed=="Super fast") {
-    samples_per_iter = 10
+    samples_per_iter = 50
   }
   
   var_list$curr_sim = min(var_list$curr_sim + samples_per_iter, MAX_SIM)
@@ -265,6 +276,18 @@ server = function(input, output, session){
     running(FALSE)
     reset_vars(var_list)
   })
+
+  # samples are generated once per run, so changing any data-generation or
+  # confidence level input stops and resets the run rather than mixing old
+  # samples with new settings
+  observeEvent(
+    list(input$dist, input$p, input$a, input$b, input$m, input$sd, input$n, input$cl),
+    {
+      running(FALSE)
+      reset_vars(var_list)
+    },
+    ignoreInit = TRUE
+  )
 
   # One observer for the session; Play never creates another timer observer.
   observe({
@@ -364,13 +387,30 @@ server = function(input, output, session){
         input$m + 3*input$sd
       }
       
-      plot(
-        var_list$real_density,
-        xlim = c(xmin, xmax),
-        main = paste0('Sampling distribution of estimator given n=', input$n),
-        xlab = 'Possible values of estimator',
-        lwd = 2
-      )
+      main = paste0('Sampling distribution of estimator given n=', input$n)
+      if (input$dist == "Bernoulli") {
+        # sample proportions only take values k/n: one bar for each unique value
+        props = table(var_list$real_estimates) / length(var_list$real_estimates)
+        values = as.numeric(names(props))
+        bar_half_width = 0.4 / input$n
+        plot(
+          NA,
+          xlim = c(xmin, xmax),
+          ylim = c(0, max(props)),
+          main = main,
+          xlab = 'Possible values of estimator',
+          ylab = 'Probability'
+        )
+        rect(values - bar_half_width, 0, values + bar_half_width, as.numeric(props))
+      } else {
+        plot(
+          var_list$real_density,
+          xlim = c(xmin, xmax),
+          main = main,
+          xlab = 'Possible values of estimator',
+          lwd = 2
+        )
+      }
       
       # add a vertical line at the true mean
       abline(v=var_list$true_mean, col="red", lwd=3)

@@ -4,145 +4,148 @@ library(tidyverse)
 INF_EQUIVALENT = 20000
 
 ui = fluidPage(
+  withMathJax(),
+  tags$head(tags$style(HTML("
+    .well { padding: 8px 12px; margin-bottom: 8px; }
+    .well h4 { margin-top: 0; margin-bottom: 6px; }
+    .well .form-group { margin-bottom: 6px; }
+    .well label { margin-bottom: 2px; font-weight: normal; }
+    .well .form-control { height: 28px; padding: 2px 8px; }
+    .well select.form-control { height: 30px; }
+    .well .selectize-input { min-height: 28px; padding: 3px 8px; }
+    .well .row .btn { padding: 3px 10px; }
+  "))),
   titlePanel("STAT 131A Parametric bootstrap simulation"),
   hr(style="border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
-      selectInput(
-        inputId = "dist",
-        label = "Data distribution",
-        choices = c("Bernoulli", "Uniform", "Normal", "Fair coin with fixed sample")
-        # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Bernoulli'",
+      wellPanel(
+        h4("Data-generation"),
+        selectInput(
+          inputId = "dist",
+          label = "Data distribution",
+          choices = c("Bernoulli", "Uniform", "Normal", "Fair coin with fixed sample")
+          # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Bernoulli'",
+          numericInput(
+            inputId = "p",
+            label = "Probability of success \\(p\\)",
+            value = 0.5,
+            min = 0,
+            max = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Uniform'", 
+          numericInput(
+            inputId = "a",
+            label = "Minimum \\(a\\)",
+            value = 0
+          ),
+          numericInput(
+            inputId = "b",
+            label = "Maximum \\(b\\)",
+            value = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Normal'", 
+          numericInput(
+            inputId = "m",
+            label = "Mean \\(\\mu\\)",
+            value = 0
+          ),
+          numericInput(
+            inputId = "sd",
+            label = "Standard deviation \\(\\sigma\\)",
+            value = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Fair coin with fixed sample'", 
+          numericInput(
+            inputId = "fixed_n_heads",
+            label = "Number of heads in sample",
+            value = 5,
+            min = 0,
+          )
+        ),
+        # conditionalPanel(
+        #   condition = "input.dist == 'Binomial'", 
+        #   numericInput(
+        #     inputId = "size",
+        #     label = "Number of trials",
+        #     value = 10,
+        #     min = 1
+        #   )
+        # ),
+        # conditionalPanel(
+        #   condition = "input.dist == 'Binomial'", 
+        #   numericInput(
+        #     inputId = "binom_prob",
+        #     label = "Probability of success",
+        #     value = 0.5,
+        #     min = 0,
+        #     max = 1
+        #   )
+        # ),
+        # conditionalPanel(
+        #   condition = "input.dist == 'Geometric'", 
+        #   numericInput(
+        #     inputId = "geom_prob",
+        #     label = "Probability of success",
+        #     value = 0.5,
+        #     min = 0,
+        #     max = 1
+        #   )
+        # ),
         numericInput(
-          inputId = "p",
-          label = "Probability of success ( p )",
-          value = 0.5,
-          min = 0,
-          max = 1
+          inputId = "n",
+          label = "Sample size \\(n\\)",
+          value = 30,
+          min = 2
         )
       ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
+      wellPanel(
+        h4("Estimator"),
+        selectInput(
+          inputId = "theta_hat",
+          label = "Estimator",
+          choices = c("Mean", "Median", "Minimum", "Maximum", "Quantile")
+          # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
+        ),
+        conditionalPanel(
+          condition = "input.theta_hat == 'Quantile'", 
+          numericInput(
+            inputId = "q",
+            label = "Quantile",
+            value = 0.5,
+            min = 0,
+            max = 1
+          )
+        ),
         numericInput(
-          inputId = "a",
-          label = "Minimum ( a )",
-          value = 0
+          inputId = "B",
+          label = "Number of bootstrap resamples \\(B\\)",
+          value = 1000,
+          min = 1
         )
       ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'", 
-        numericInput(
-          inputId = "b",
-          label = "Maximum ( b )",
-          value = 1
+      wellPanel(
+        # selectInput(
+        #   inputId = "speed",
+        #   label = "Simulation Speed",
+        #   choices = c("Slow", "Normal", "Fast"),
+        #   selected = "Normal"
+        # ),
+        fluidRow(
+          # column(2, actionButton("reset","Reset")),
+          # column(width=7,actionButton("stop","Stop")),
+          column(2, actionButton("play","Play"))
         )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'", 
-        numericInput(
-          inputId = "m",
-          label = "Mean ( \u03bc )",
-          value = 0
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'", 
-        numericInput(
-          inputId = "sd",
-          label = "Standard Deviation ( \u03c3 )",
-          value = 1
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'", 
-        numericInput(
-          inputId = "sd",
-          label = "Standard Deviation ( \u03c3 )",
-          value = 1
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Fair coin with fixed sample'", 
-        numericInput(
-          inputId = "fixed_n_heads",
-          label = "Number of heads in sample",
-          value = 5,
-          min = 0,
-        )
-      ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Binomial'", 
-      #   numericInput(
-      #     inputId = "size",
-      #     label = "Number of trials",
-      #     value = 10,
-      #     min = 1
-      #   )
-      # ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Binomial'", 
-      #   numericInput(
-      #     inputId = "binom_prob",
-      #     label = "Probability of success",
-      #     value = 0.5,
-      #     min = 0,
-      #     max = 1
-      #   )
-      # ),
-      # conditionalPanel(
-      #   condition = "input.dist == 'Geometric'", 
-      #   numericInput(
-      #     inputId = "geom_prob",
-      #     label = "Probability of success",
-      #     value = 0.5,
-      #     min = 0,
-      #     max = 1
-      #   )
-      # ),
-      numericInput(
-        inputId = "n",
-        label = "Sample size (n)",
-        value = 30,
-        min = 2
-      ),
-      selectInput(
-        inputId = "theta_hat",
-        label = "Estimator",
-        choices = c("Mean", "Median", "Minimum", "Maximum", "Quantile")
-        # choices = c("Bernoulli", "Uniform", "Normal", "Binomial", "Geometric")
-      ),
-      conditionalPanel(
-        condition = "input.theta_hat == 'Quantile'", 
-        numericInput(
-          inputId = "q",
-          label = "Quantile",
-          value = 0.5,
-          min = 0,
-          max = 1
-        )
-      ),
-      numericInput(
-        inputId = "B",
-        label = "Number of bootstrap resamples (B)",
-        value = 1000,
-        min = 1
-      ),
-      # selectInput(
-      #   inputId = "speed",
-      #   label = "Simulation Speed",
-      #   choices = c("Slow", "Normal", "Fast"),
-      #   selected = "Normal"
-      # ),
-      
-     hr(style="border-color: grey;"),
-     fluidRow(
-       # column(2, actionButton("reset","Reset")),
-       # column(width=7,actionButton("stop","Stop")),
-       column(2, actionButton("play","Play"))
-     )
+      )
     ),
     
     # plot panel
@@ -512,23 +515,53 @@ server = function(input,output){
         input$m + 3*input$sd
       }
       
-      true_sampling_kde = density(
-        var_list$real_estimates,
-        na.rm = TRUE,
-        adjust = 3,
-        from = xmin,
-        to = xmax
-      )
-
-      plot(
-        true_sampling_kde,
-        xlim = c(xmin, xmax),
-        main = paste0('True sampling distribution of ', var_list$estimator_name, ' (unobserved)'),
-        xlab = paste('Possible values of estimator'),
-        ylab = 'Density',
-        type = 'l',
-        lwd = 2
-      )
+      main = paste0('True sampling distribution of ', var_list$estimator_name, ' (unobserved)')
+      
+      if (input$dist == "Bernoulli" | input$dist == "Fair coin with fixed sample") {
+        # estimates from 0/1 data only take a few values: one bar for each unique value
+        props = table(var_list$real_estimates) / sum(!is.na(var_list$real_estimates))
+        values = as.numeric(names(props))
+        bar_half_width = if (length(values) > 1) min(0.4 * min(diff(values)), 0.02) else 0.02
+        plot(
+          NA,
+          xlim = c(xmin, xmax),
+          ylim = c(0, max(props)),
+          main = main,
+          xlab = paste('Possible values of estimator'),
+          ylab = 'Probability'
+        )
+        rect(values - bar_half_width, 0, values + bar_half_width, as.numeric(props))
+      } else {
+        # default bandwidth, so the curve's width matches the true SE
+        estimates = var_list$real_estimates[!is.na(var_list$real_estimates)]
+        if (input$dist == "Uniform") {
+          # estimates can't fall outside [a, b], so reflect them across both edges;
+          # otherwise the curve wrongly dips at an edge (e.g. the sample maximum near b)
+          true_sampling_kde = density(
+            c(estimates, 2 * xmin - estimates, 2 * xmax - estimates),
+            bw = bw.nrd0(estimates),
+            from = xmin,
+            to = xmax
+          )
+          true_sampling_kde$y = 3 * true_sampling_kde$y
+        } else {
+          true_sampling_kde = density(
+            estimates,
+            from = xmin,
+            to = xmax
+          )
+        }
+        
+        plot(
+          true_sampling_kde,
+          xlim = c(xmin, xmax),
+          main = main,
+          xlab = paste('Possible values of estimator'),
+          ylab = 'Density',
+          type = 'l',
+          lwd = 2
+        )
+      }
       
       # write the sample mean and SD above the plot
       mtext(side=3, text=paste0(

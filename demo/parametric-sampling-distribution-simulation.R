@@ -8,75 +8,84 @@ SIMULATION_INTERVALS <- c(
 )
 
 ui <- fluidPage(
+  withMathJax(),
+  tags$head(tags$style(HTML("
+    .well { padding: 8px 12px; margin-bottom: 8px; }
+    .well h4 { margin-top: 0; margin-bottom: 6px; }
+    .well .form-group { margin-bottom: 6px; }
+    .well label { margin-bottom: 2px; font-weight: normal; }
+    .well .form-control { height: 28px; padding: 2px 8px; }
+    .well select.form-control { height: 30px; }
+    .well .selectize-input { min-height: 28px; padding: 3px 8px; }
+    .well .row .btn { padding: 3px 10px; }
+  "))),
   titlePanel("STAT 131A Parallel Universe Simulator"),
   hr(style = "border-color: grey;"),
   sidebarLayout(
     sidebarPanel(
-      selectInput(
-        inputId = "dist",
-        label = "Data distribution",
-        choices = c("Bernoulli", "Uniform", "Normal")
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Bernoulli'",
+      wellPanel(
+        h4("Data-generation"),
+        selectInput(
+          inputId = "dist",
+          label = "Data distribution",
+          choices = c("Bernoulli", "Uniform", "Normal")
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Bernoulli'",
+          numericInput(
+            inputId = "p",
+            label = "Probability of success \\(p\\)",
+            value = 0.5,
+            min = 0,
+            max = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Uniform'",
+          numericInput(
+            inputId = "a",
+            label = "Minimum \\(a\\)",
+            value = 0
+          ),
+          numericInput(
+            inputId = "b",
+            label = "Maximum \\(b\\)",
+            value = 1
+          )
+        ),
+        conditionalPanel(
+          condition = "input.dist == 'Normal'",
+          numericInput(
+            inputId = "m",
+            label = "Mean \\(\\mu\\)",
+            value = 0
+          ),
+          numericInput(
+            inputId = "sd",
+            label = "Standard deviation \\(\\sigma\\)",
+            value = 1,
+            min = 0
+          )
+        ),
         numericInput(
-          inputId = "p",
-          label = "Probability of success ( p )",
-          value = 0.5,
-          min = 0,
-          max = 1
+          inputId = "n",
+          label = "Sample size \\(n\\)",
+          value = 30,
+          min = 1
         )
       ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'",
-        numericInput(
-          inputId = "a",
-          label = "Minimum ( a )",
-          value = 0
+      wellPanel(
+        selectInput(
+          inputId = "speed",
+          label = "Simulation Speed",
+          choices = names(SIMULATION_INTERVALS),
+          selected = "Normal"
+        ),
+        fluidRow(
+          column(width = 4, actionButton("reset", "Reset")),
+          column(width = 4, actionButton("stop", "Stop")),
+          column(width = 4, actionButton("play", "Play"))
         )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Uniform'",
-        numericInput(
-          inputId = "b",
-          label = "Maximum ( b )",
-          value = 1
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'",
-        numericInput(
-          inputId = "m",
-          label = "Mean ( \u03bc )",
-          value = 0
-        )
-      ),
-      conditionalPanel(
-        condition = "input.dist == 'Normal'",
-        numericInput(
-          inputId = "sd",
-          label = "Standard Deviation ( \u03c3 )",
-          value = 1,
-          min = 0
-        )
-      ),
-      numericInput(
-        inputId = "n",
-        label = "Sample size",
-        value = 30,
-        min = 1
-      ),
-      selectInput(
-        inputId = "speed",
-        label = "Simulation Speed",
-        choices = names(SIMULATION_INTERVALS),
-        selected = "Normal"
-      ),
-      hr(style = "border-color: grey;"),
-      fluidRow(
-        column(width = 4, actionButton("reset", "Reset")),
-        column(width = 4, actionButton("stop", "Stop")),
-        column(width = 4, actionButton("play", "Play"))
       )
     ),
     mainPanel(
@@ -144,12 +153,24 @@ server <- function(input, output, session) {
     state$playing <- FALSE
   })
 
-  observeEvent(input$reset, {
+  reset_state <- function() {
     state$playing <- FALSE
     state$curr_sample <- NULL
     state$curr_mean <- NA_real_
     state$mean_vec <- numeric()
+  }
+
+  observeEvent(input$reset, {
+    reset_state()
   })
+
+  # changing any data-generation input stops and resets the run, so one
+  # sampling distribution never mixes samples drawn under different settings
+  observeEvent(
+    list(input$dist, input$p, input$a, input$b, input$m, input$sd, input$n),
+    reset_state(),
+    ignoreInit = TRUE
+  )
 
   observe({
     req(state$playing)
