@@ -152,8 +152,9 @@ ui = fluidPage(
     # plot panel
     mainPanel(
       
-      uiOutput(outputId='running_summary'),
+      uiOutput(outputId='running_ci_summary'),
       plotOutput(outputId='data_dist', height='200px'),
+      uiOutput(outputId='running_test_summary'),
       plotOutput(outputId='sampling_dist', height='200px'),
       plotOutput(outputId='est_sampling_dist', height='200px'),
       
@@ -775,7 +776,8 @@ server = function(input, output, session){
     1 - input$alpha
   })
   
-  output$running_summary = renderUI({
+  # running confidence interval results, above the plot of the current sample
+  output$running_ci_summary = renderUI({
     req(var_list$curr_sim >= 1, !is.na(var_list$coverage[1]))
     i = var_list$curr_sim
     tagList(
@@ -788,7 +790,18 @@ server = function(input, output, session){
         tags$li(paste0(
           "A confidence interval that ACTUALLY captures the true fixed mean: ",
           round(var_list$coverage_est[i], 3)
-        )),
+        ))
+      )
+    )
+  })
+  
+  # running hypothesis test results, above the null sampling distribution plots
+  output$running_test_summary = renderUI({
+    req(var_list$curr_sim >= 1, !is.na(var_list$reject_true_prop[1]))
+    i = var_list$curr_sim
+    tagList(
+      paste0("Proportion of ", i, " random samples with:"),
+      tags$ul(
         tags$li(paste0(
           "A hypothesis test that SHOULD reject the null hypothesis: ",
           round(var_list$reject_true_prop[i], 3)
